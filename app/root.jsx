@@ -4,7 +4,17 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useLoaderData,
 } from "@remix-run/react";
+import { json } from "@remix-run/node";
+
+export const loader = async () => {
+  return json({
+    ENV: {
+      STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY,
+    },
+  });
+};
 
 export const meta = () => {
   return [
@@ -18,6 +28,8 @@ export const meta = () => {
 };
 
 export default function App() {
+  const data = useLoaderData();
+
   return (
     <html lang="en">
       <head>
@@ -49,12 +61,7 @@ export default function App() {
               --color-gray: #6c757d;
               --color-border: #e9ecef;
               --font-mono: 'JetBrains Mono', monospace;
-              --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-              --shadow-sm: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
-              --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.06);
-              --shadow-lg: 0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05);
-              --border-radius: 8px;
-              --transition: all 0.2s ease-in-out;
+              --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
             }
 
             * {
@@ -65,18 +72,15 @@ export default function App() {
               font-family: var(--font-sans);
               line-height: 1.6;
               color: var(--color-dark);
-              background-color: var(--color-light);
               margin: 0;
               padding: 0;
+              background-color: #ffffff;
             }
 
-            .code-highlight {
-              font-family: var(--font-mono);
-              background: var(--color-dark);
-              color: var(--color-secondary);
-              padding: 2px 6px;
-              border-radius: 4px;
-              font-size: 0.9em;
+            .container {
+              max-width: 1200px;
+              margin: 0 auto;
+              padding: 0 24px;
             }
 
             .btn {
@@ -84,41 +88,58 @@ export default function App() {
               align-items: center;
               justify-content: center;
               padding: 12px 24px;
-              border: none;
-              border-radius: var(--border-radius);
-              font-family: var(--font-sans);
-              font-weight: 500;
+              border-radius: 8px;
+              font-weight: 600;
               text-decoration: none;
+              transition: all 0.2s ease;
+              border: none;
               cursor: pointer;
-              transition: var(--transition);
-              font-size: 16px;
+              font-size: 14px;
+              line-height: 1.4;
             }
 
             .btn-primary {
-              background: var(--color-primary);
+              background-color: var(--color-primary);
               color: white;
             }
 
             .btn-primary:hover {
-              background: var(--color-primary-dark);
+              background-color: var(--color-primary-dark);
               transform: translateY(-1px);
-              box-shadow: var(--shadow-md);
             }
 
             .btn-secondary {
-              background: var(--color-secondary);
+              background-color: var(--color-secondary);
               color: var(--color-dark);
             }
 
             .btn-secondary:hover {
-              background: #00c49a;
+              background-color: #00c49a;
               transform: translateY(-1px);
             }
 
-            .container {
-              max-width: 1200px;
-              margin: 0 auto;
-              padding: 0 20px;
+            .btn-outline {
+              background-color: transparent;
+              color: var(--color-primary);
+              border: 2px solid var(--color-primary);
+            }
+
+            .btn-outline:hover {
+              background-color: var(--color-primary);
+              color: white;
+            }
+
+            .card {
+              background: white;
+              border-radius: 12px;
+              padding: 2rem;
+              box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+              transition: all 0.3s ease;
+            }
+
+            .card:hover {
+              transform: translateY(-4px);
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
             }
 
             .grid {
@@ -126,25 +147,14 @@ export default function App() {
               gap: 2rem;
             }
 
-            .grid-2 {
-              grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            }
+            .grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+            .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
-            .grid-3 {
-              grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            }
-
-            .card {
-              background: white;
-              border-radius: var(--border-radius);
-              padding: 2rem;
-              box-shadow: var(--shadow-sm);
-              transition: var(--transition);
-            }
-
-            .card:hover {
-              box-shadow: var(--shadow-md);
-              transform: translateY(-2px);
+            @media (max-width: 1024px) {
+              .grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+              .grid-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             }
 
             @media (max-width: 768px) {
@@ -167,6 +177,11 @@ export default function App() {
         <Outlet />
         <ScrollRestoration />
         <Scripts />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.ENV = ${JSON.stringify(data.ENV)}`,
+          }}
+        />
       </body>
     </html>
   );
