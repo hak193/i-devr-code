@@ -1,0 +1,35 @@
+name: i-devr Stripe Checkout CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      NEXT_PUBLIC_BASE_URL: ${{ secrets.NEXT_PUBLIC_BASE_URL }}
+
+    steps:
+      - name: 🧾 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🧬 Generate Prisma client
+        run: npx prisma generate
+
+      - name: 🧪 Run Prisma migrations
+        run: npx prisma migrate deploy
+
+      - name: 🧹 Lint project
+        run: npm run lint
+
+      - name: 🧪 Run tests (optional)
+        run: npm test || echo "No tests yet 😅"
