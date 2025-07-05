@@ -5,28 +5,156 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
+// Shopify Sessions (existing)
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id          String    @id
+  shop        String
+  state       String
+  isOnline    Boolean   @default(false)
+  scope       String?
+  expires     DateTime?
+  accessToken String
+  userId      BigInt?
+  firstName   String?
+  lastName    String?
+  email       String?
+  accountOwner Boolean  @default(false)
+  locale      String?
+  collaborator Boolean? @default(false)
+  emailVerified Boolean? @default(false)
+}
+
+// Users for the platform
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String
+  stripeCustomerId  String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relationships
+  subscriptions     Subscription[]
+  purchases         Purchase[]
+  appBuilds         AppBuild[]
+
+  @@map("users")
+}
+
+// Subscription plans and user subscriptions
+model Subscription {
+  id                    String   @id @default(cuid())
+  userId                String
+  stripeSubscriptionId  String   @unique
+  stripePriceId         String
+  planType              String   // 'builder-access', 'pro-builder'
+  status                String   // 'active', 'canceled', 'past_due', etc.
+  currentPeriodStart    DateTime
+  currentPeriodEnd      DateTime
+  trialStart            DateTime?
+  trialEnd              DateTime?
+  cancelAtPeriodEnd     Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relationships
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// Software purchases
+model Purchase {
+  id                      String   @id @default(cuid())
+  userId                  String
+  stripePaymentIntentId   String   @unique
+  softwareId              String
+  softwareName            String
+  amount                  Int      // Amount in cents
+  status                  String   // 'completed', 'failed', 'refunded'
+  downloadUrl             String?
+  licenseKey              String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  // Relationships
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  software                Software @relation(fields: [softwareId], references: [id])
+
+  @@map("purchases")
+}
+
+// Software catalog
+model Software {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  price       Int      // Price in cents
+  category    String
+  tags        String[] // Array of tags
+  imageUrl    String?
+  downloadUrl String
+  version     String   @default("1.0.0")
+  isActive    Boolean  @default(true)
+  featured    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  purchases   Purchase[]
+
+  @@map("software")
+}
+
+// AI App Builder projects
+model AppBuild {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  config      Json     // Store the app configuration as JSON
+  sourceCode  String?  // Generated source code
+  status      String   // 'draft', 'building', 'completed', 'failed'
+  buildType   String   // 'web', 'mobile', 'desktop'
+  framework   String   // 'react', 'vue', 'angular', etc.
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("app_builds")
+}
+
+// Payment events for audit trail
+model PaymentEvent {
+  id                String   @id @default(cuid())
+  stripeEventId     String   @unique
+  eventType         String
+  customerId        String?
+  subscriptionId    String?
+  paymentIntentId   String?
+  amount            Int?
+  status            String
+  metadata          Json?
+  processed         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  @@map("payment_events")
+}
+
+// System settings
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
 }

@@ -1,304 +1,351 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import { getStripe, getPaymentElementOptions, validatePaymentForm } from "~/lib/stripe.client";
 
-export function PaymentModal({ isOpen, onClose, item, type = "software" }) {
-  const [paymentMethod, setPaymentMethod] = useState("card");
+// Payment form component that uses Stripe Elements
+function PaymentForm({ item, type, onSuccess, onError, onClose }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isProcessing, setIsProcessing] = useState(false);
   const [formData, setFormData] = useState({
     email: "",
-    cardNumber: "",
-    expiryDate: "",
-    cvv: "",
     name: "",
-    address: "",
-    city: "",
-    zipCode: ""
   });
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [paymentComplete, setPaymentComplete] = useState(false);
+  const [formErrors, setFormErrors] = useState({});
 
-  if (!isOpen) return null;
+  const handleSubmit = async (event) => {
+    event.preventDefault();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (!stripe || !elements) {
+      return;
+    }
+
+    // Validate form data
+    const validation = validatePaymentForm(formData);
+    if (!validation.isValid) {
+      setFormErrors(validation.errors);
+      return;
+    }
+
     setIsProcessing(true);
-    
-    // Simulate payment processing
-    setTimeout(() => {
+    setFormErrors({});
+
+    try {
+      // Create payment intent or subscription on the server
+      const response = await fetch('/api/create-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: type === 'subscription' ? 'subscription' : 'payment',
+          amount: type === 'subscription' ? undefined : item.price,
+          email: formData.email,
+          name: formData.name,
+          planId: type === 'subscription' ? getPlanId(item.name) : undefined,
+          metadata: {
+            itemName: item.name,
+            itemId: item.id || 'custom',
+            softwareName: item.name,
+            softwareId: item.id,
+          }
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Payment setup failed');
+      }
+
+      // Confirm the payment
+      const { error } = await stripe.confirmPayment({
+        elements,
+        clientSecret: result.clientSecret,
+        confirmParams: {
+          return_url: `${window.location.origin}/payment-success`,
+        },
+        redirect: 'if_required',
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      // Payment succeeded
+      onSuccess({
+        type: result.type,
+        paymentIntentId: result.paymentIntentId,
+        subscriptionId: result.subscriptionId,
+        customerId: result.customerId,
+      });
+
+    } catch (error) {
+      console.error('Payment error:', error);
+      onError(error.message);
+    } finally {
       setIsProcessing(false);
-      setPaymentComplete(true);
-      
-      // Auto-close after success
-      setTimeout(() => {
-        setPaymentComplete(false);
-        onClose();
-      }, 3000);
-    }, 2000);
+    }
   };
 
-  const handleInputChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    // Clear error when user starts typing
+    if (formErrors[field]) {
+      setFormErrors(prev => ({ ...prev, [field]: '' }));
+    }
+  };
+
+  const getPlanId = (planName) => {
+    const planMap = {
+      'Builder Access': 'builder-access',
+      'Pro Builder': 'pro-builder',
+    };
+    return planMap[planName] || 'builder-access';
+  };
+
+  const buttonText = type === 'subscription' ? 'Start Free Trial' : 'Complete Purchase';
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Customer Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Contact Information</h3>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Email Address *
+          </label>
+          <input
+            type="email"
+            value={formData.email}
+            onChange={(e) => handleInputChange('email', e.target.value)}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+              formErrors.email ? 'border-red-500' : 'border-gray-300'
+            }`}
+            placeholder="your@email.com"
+            required
+          />
+          {formErrors.email && (
+            <p className="mt-1 text-sm text-red-600">{formErrors.email}</p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Full Name *
+          </label>
+          <input
+            type="text"
+            value={formData.name}
+            onChange={(e) => handleInputChange('name', e.target.value)}
+            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+              formErrors.name ? 'border-red-500' : 'border-gray-300'
+            }`}
+            placeholder="John Doe"
+            required
+          />
+          {formErrors.name && (
+            <p className="mt-1 text-sm text-red-600">{formErrors.name}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Payment Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Payment Information</h3>
+        <div className="p-4 border border-gray-200 rounded-lg">
+          <PaymentElement options={getPaymentElementOptions()} />
+        </div>
+      </div>
+
+      {/* Order Summary */}
+      <div className="bg-gray-50 p-4 rounded-lg">
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">Order Summary</h3>
+        <div className="space-y-2">
+          <div className="flex justify-between">
+            <span className="text-gray-600">{item.name}</span>
+            <span className="font-semibold">
+              ${item.price}{type === 'subscription' ? '/month' : ''}
+            </span>
+          </div>
+          {type === 'subscription' && (
+            <div className="flex justify-between text-sm text-green-600">
+              <span>7-day free trial</span>
+              <span>$0.00</span>
+            </div>
+          )}
+          <div className="border-t pt-2 flex justify-between font-bold">
+            <span>Total {type === 'subscription' ? '(after trial)' : ''}</span>
+            <span>${item.price}{type === 'subscription' ? '/month' : ''}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex space-x-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+          disabled={isProcessing}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={!stripe || isProcessing}
+          className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {isProcessing ? (
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+              Processing...
+            </div>
+          ) : (
+            <span>{buttonText}</span>
+          )}
+        </button>
+      </div>
+
+      {type === 'subscription' && (
+        <p className="text-xs text-gray-500 text-center">
+          You won't be charged during your 7-day free trial. Cancel anytime.
+        </p>
+      )}
+    </form>
+  );
+}
+
+// Main PaymentModal component
+export function PaymentModal({ isOpen, onClose, item, type = "software" }) {
+  const [paymentStatus, setPaymentStatus] = useState('idle'); // idle, success, error
+  const [statusMessage, setStatusMessage] = useState('');
+  const [stripePromise, setStripePromise] = useState(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setStripePromise(getStripe());
+      setPaymentStatus('idle');
+      setStatusMessage('');
+    }
+  }, [isOpen]);
+
+  const handlePaymentSuccess = (result) => {
+    setPaymentStatus('success');
+    if (result.type === 'subscription') {
+      setStatusMessage('Subscription created successfully! Your free trial has started.');
+    } else {
+      setStatusMessage('Payment successful! You now have access to your purchase.');
+    }
+
+    // Auto-close after 3 seconds
+    setTimeout(() => {
+      onClose();
+    }, 3000);
+  };
+
+  const handlePaymentError = (error) => {
+    setPaymentStatus('error');
+    setStatusMessage(error || 'Payment failed. Please try again.');
+  };
+
+  const handleClose = () => {
+    setPaymentStatus('idle');
+    setStatusMessage('');
+    onClose();
+  };
+
+  const isPaymentFormReady = paymentStatus === 'idle' && stripePromise;
+  const isPaymentFormLoading = paymentStatus === 'idle' && !stripePromise;
+
+  if (!isOpen || !item) return null;
+
+  const options = {
+    mode: type === 'subscription' ? 'subscription' : 'payment',
+    amount: type === 'subscription' ? undefined : item.price * 100,
+    currency: 'usd',
+    appearance: {
+      theme: 'stripe',
+      variables: {
+        colorPrimary: '#3b82f6',
+      },
+    },
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        {paymentComplete ? (
-          // Success State
-          <div className="p-8 text-center">
-            <div className="text-green-500 text-6xl mb-4">✅</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Payment Successful!</h2>
-            <p className="text-gray-600 mb-6">
-              {type === "subscription" 
-                ? "Your subscription is now active. You have unlimited access to the AI App Builder."
-                : `You now own "${item?.name}". Check your email for download instructions.`
-              }
-            </p>
-            <div className="bg-gray-50 rounded-lg p-4">
-              <p className="text-sm text-gray-600">
-                📧 Confirmation email sent to: <strong>{formData.email}</strong>
-              </p>
-            </div>
+        <div className="p-6">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-900">
+              {type === 'subscription' ? 'Subscribe to Plan' : 'Complete Purchase'}
+            </h2>
+            <button
+              onClick={handleClose}
+              className="text-gray-400 hover:text-gray-600 text-2xl"
+            >
+              ×
+            </button>
           </div>
-        ) : (
-          <>
-            {/* Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900">
-                {type === "subscription" ? "Subscribe to AI Builder" : `Purchase ${item?.name}`}
-              </h2>
+
+          {/* Content */}
+          {paymentStatus === 'success' && (
+            <div className="text-center py-8">
+              <div className="text-green-500 text-6xl mb-4">✅</div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Success!</h3>
+              <p className="text-gray-600 mb-4">{statusMessage}</p>
               <button
-                onClick={onClose}
-                className="text-gray-400 hover:text-gray-600"
+                onClick={handleClose}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                Continue
               </button>
             </div>
+          )}
 
-            {/* Order Summary */}
-            <div className="p-6 bg-gray-50 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-900 mb-3">Order Summary</h3>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-900">
-                    {type === "subscription" ? "AI App Builder Pro" : item?.name}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    {type === "subscription" 
-                      ? "Monthly subscription with unlimited access"
-                      : "One-time purchase with full source code"
-                    }
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xl font-bold text-gray-900">
-                    ${type === "subscription" ? "79" : item?.price || "99"}
-                    {type === "subscription" && <span className="text-sm text-gray-600">/month</span>}
-                  </p>
-                </div>
+          {paymentStatus === 'error' && (
+            <div className="text-center py-8">
+              <div className="text-red-500 text-6xl mb-4">❌</div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Payment Failed</h3>
+              <p className="text-gray-600 mb-4">{statusMessage}</p>
+              <div className="space-x-4">
+                <button
+                  onClick={() => setPaymentStatus('idle')}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Try Again
+                </button>
+                <button
+                  onClick={handleClose}
+                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
+          )}
 
-            {/* Payment Form */}
-            <form onSubmit={handleSubmit} className="p-6">
-              {/* Email */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email Address *
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  required
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="your@email.com"
-                />
-              </div>
+          {isPaymentFormReady && (
+            <Elements stripe={stripePromise} options={options}>
+              <PaymentForm
+                item={item}
+                type={type}
+                onSuccess={handlePaymentSuccess}
+                onError={handlePaymentError}
+                onClose={handleClose}
+              />
+            </Elements>
+          )}
 
-              {/* Payment Method */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  Payment Method
-                </label>
-                <div className="grid grid-cols-2 gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod("card")}
-                    className={`p-4 border-2 rounded-lg flex items-center justify-center space-x-2 ${
-                      paymentMethod === "card" 
-                        ? "border-blue-500 bg-blue-50" 
-                        : "border-gray-300 hover:border-gray-400"
-                    }`}
-                  >
-                    <span>💳</span>
-                    <span>Credit Card</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod("paypal")}
-                    className={`p-4 border-2 rounded-lg flex items-center justify-center space-x-2 ${
-                      paymentMethod === "paypal" 
-                        ? "border-blue-500 bg-blue-50" 
-                        : "border-gray-300 hover:border-gray-400"
-                    }`}
-                  >
-                    <span>🅿️</span>
-                    <span>PayPal</span>
-                  </button>
-                </div>
-              </div>
-
-              {paymentMethod === "card" && (
-                <>
-                  {/* Card Details */}
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Card Number *
-                    </label>
-                    <input
-                      type="text"
-                      name="cardNumber"
-                      required
-                      value={formData.cardNumber}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="1234 5678 9012 3456"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Expiry Date *
-                      </label>
-                      <input
-                        type="text"
-                        name="expiryDate"
-                        required
-                        value={formData.expiryDate}
-                        onChange={handleInputChange}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="MM/YY"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        CVV *
-                      </label>
-                      <input
-                        type="text"
-                        name="cvv"
-                        required
-                        value={formData.cvv}
-                        onChange={handleInputChange}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="123"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Billing Info */}
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Cardholder Name *
-                    </label>
-                    <input
-                      type="text"
-                      name="name"
-                      required
-                      value={formData.name}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="John Doe"
-                    />
-                  </div>
-
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Billing Address *
-                    </label>
-                    <input
-                      type="text"
-                      name="address"
-                      required
-                      value={formData.address}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-4"
-                      placeholder="123 Main Street"
-                    />
-                    <div className="grid grid-cols-2 gap-4">
-                      <input
-                        type="text"
-                        name="city"
-                        required
-                        value={formData.city}
-                        onChange={handleInputChange}
-                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="City"
-                      />
-                      <input
-                        type="text"
-                        name="zipCode"
-                        required
-                        value={formData.zipCode}
-                        onChange={handleInputChange}
-                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="ZIP Code"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* Terms */}
-              <div className="mb-6">
-                <label className="flex items-start space-x-3">
-                  <input
-                    type="checkbox"
-                    required
-                    className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-600">
-                    I agree to the <a href="/terms" className="text-blue-600 hover:underline">Terms of Service</a> and{" "}
-                    <a href="/privacy" className="text-blue-600 hover:underline">Privacy Policy</a>
-                  </span>
-                </label>
-              </div>
-
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className={`w-full py-3 px-6 rounded-lg font-bold text-white transition-colors ${
-                  isProcessing
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
-                }`}
-              >
-                {isProcessing ? (
-                  <div className="flex items-center justify-center space-x-2">
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>Processing...</span>
-                  </div>
-                ) : (
-                  `Complete Purchase - $${type === "subscription" ? "79" : item?.price || "99"}`
-                )}
-              </button>
-
-              {/* Security Notice */}
-              <div className="mt-4 text-center">
-                <p className="text-xs text-gray-500">
-                  🔒 Your payment information is encrypted and secure
-                </p>
-              </div>
-            </form>
-          </>
-        )}
+          {isPaymentFormLoading && (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading payment form...</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
